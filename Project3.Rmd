@@ -1,0 +1,134 @@
+---
+title: "Project 3"
+author: "Chester Poon"
+date: "10/14/2018"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(DBI)
+library(RSQLite)
+```
+
+
+
+```{r}
+linkedin <- read.csv('LinkedIn.csv', stringsAsFactors = FALSE)
+linkedin$title <- gsub('\n\n','',linkedin$title)
+linkedin <- linkedin %>%
+  mutate(website = "linkedin.com")
+```
+
+
+
+```{r}
+indeed <- read.csv('Data_Science_Indeed_Jobs.csv', stringsAsFactors = FALSE)
+indeed <- indeed %>%
+  mutate(website = "indeed.com") %>%
+  rename(job_id = X,
+        title = Title,
+        company = Company,
+        description = Description
+         ) %>%
+  select(-Link)
+indeed$job_id <- paste("IND",as.character(indeed$job_id), sep = "")
+```
+
+
+
+```{r}
+career <- read.csv('careerbuilder.csv', stringsAsFactors = FALSE)
+career <- career %>%
+  rename(title = jobbank..Job.Title.,
+         description = jobdesc) %>%
+  select(-X) %>%
+  mutate(website = "careerbuilder.com")
+career$job_id <- paste("CB", as.character(career$job_id), sep = "")
+```
+
+
+
+```{r}
+main_df <- full_join(linkedin,indeed, 
+                     by=c("job_id",
+                          "title",
+                          "website"))
+main_df <- full_join(main_df,career,
+                     by=c("job_id",
+                          "title",
+                          "industry",
+                          "description",
+                          "website"))
+```
+
+
+
+```{r}
+industry <- unique(main_df$industry)
+industry_id <- paste("IN",as.character(1:length(industry)),sep = "")
+industry_df <- data.frame(industry,industry_id)
+
+skills <- unique(main_df$skills)
+skills_id <- paste("SK",as.character(1:length(skills)),sep = "")
+skills_df <- data.frame(skills,skills_id)
+
+title <- unique(main_df$title)
+title_id <- paste("TI",as.character(1:length(title)),sep = "")
+title_df <- data.frame(title,title_id)
+
+company <- unique(main_df$company)
+company_id <- paste("CO",as.character(1:length(company)),sep = "")
+company_df <- data.frame(company,company_id)
+
+website <- unique(main_df$website)
+website_id <- paste("WS",as.character(1:length(website)),sep = "")
+website_df <- data.frame(website,website_id)
+
+description <- unique(main_df$description)
+description_id <- paste("D",as.character(1:length(description)),sep = "")
+description_df <- data.frame(description,description_id)
+```
+
+
+
+```{r, warning=FALSE}
+jobs_df <- main_df %>%
+  left_join(industry_df, by="industry") %>%
+  left_join(skills_df, by="skills") %>%
+  left_join(title_df, by="title") %>%
+  left_join(company_df, by="company") %>%
+  left_join(website_df, by="website") %>%
+  left_join(description_df, by="description") %>%
+  select(-industry,-skills,-title,-company,-website,-description)
+```
+
+
+
+```{r}
+ds_job_db <- dbConnect(RSQLite::SQLite(), "")
+
+dbWriteTable(ds_job_db, "industry", industry_df)
+dbWriteTable(ds_job_db, "skills", skills_df)
+dbWriteTable(ds_job_db, "title", title_df)
+dbWriteTable(ds_job_db, "company", company_df)
+dbWriteTable(ds_job_db, "website", website_df)
+dbWriteTable(ds_job_db, "description", description_df)
+dbWriteTable(ds_job_db, "jobs", jobs_df)
+```
+
+```{r}
+dbGetQuery(ds_job_db,
+           "
+SELECT DISTINCT
+  W.WEBSITE
+  ,COUNT(DISTINCT J.JOB_ID) AS 'NUMBER OF JOBS'
+FROM JOBS J
+  INNER JOIN WEBSITE W ON J.WEBSITE_ID = W.WEBSITE_ID
+GROUP BY
+  W.WEBSITE
+           "
+           )
+```
+
