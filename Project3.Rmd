@@ -1,30 +1,61 @@
 ---
-title: "Project 3"
-author: "Chester Poon"
-date: "10/14/2018"
-output: html_document
+title: "Project 3 - Relational Database"
+author: "A. Joshua Bentley, John K. Hancock, and Chester Poon"
+output: 
+  prettydoc::html_pretty:
+    theme: cayman
 ---
 
-```{r}
+#Overview
+
+In order to load the data we scraped from the three different websites, we'll first clean our data. The following would need to be done:
+
+* Unify the variable names so that each variable has only one name
+* Clean the data where necessary
+* Create separate data frames for each normalized table
+* Load our data frames as a table into our SQLite database
+
+First we'll load the libraries we'll use to clean up, prepare our data, and create our database.
+
+```{r, message=FALSE}
 library(dplyr)
-library(tidyr)
 library(DBI)
 library(RSQLite)
+library(ggplot2)
 ```
 
+#Cleaning Our Data
 
+###LinkedIn
+
+Let's load the LinkedIn csv file from our web scrape and take a quick glance.
 
 ```{r}
 linkedin <- read.csv('LinkedIn.csv', stringsAsFactors = FALSE)
-linkedin$title <- gsub('\n\n','',linkedin$title)
-linkedin <- linkedin %>%
-  mutate(website = "linkedin.com")
+knitr::kable(head(linkedin), format = "html")
 ```
 
+Looks mostly clean already. We'll add another column to identify the source of the data, which we'll also do for the other two data sets.
 
+```{r}
+linkedin <- linkedin %>%
+  mutate(website = "linkedin.com")
+
+knitr::kable(head(linkedin), format = "html")
+```
+
+###Indeed
+
+Now we'll load the csv from the Indeed web scrape. We'll skip displaying the data from this data frame due to the large amount of text in one of our columns.
 
 ```{r}
 indeed <- read.csv('Data_Science_Indeed_Jobs.csv', stringsAsFactors = FALSE)
+names(indeed)
+```
+
+From viewing this data, we can tell that "X" is actually our id for each job posting. We also will not need the link column as the other two datasets do not have it. However, we will keep the "Company" column as we were unable to scrape a specific industry from Indeed. We'll clean up the column names so that it's in line with the data frame for LinkedIn. We'll also make a small edit to `job_id` in order to keep things more uniform.
+
+```{r}
 indeed <- indeed %>%
   mutate(website = "indeed.com") %>%
   rename(job_id = X,
@@ -34,21 +65,35 @@ indeed <- indeed %>%
          ) %>%
   select(-Link)
 indeed$job_id <- paste("IND",as.character(indeed$job_id), sep = "")
+
+str(indeed)
 ```
 
+###CareerBuilder
 
+Our web scrape for CareerBuilder also includes a text heavy description column, so we'll just take a look at the structure to get an idea.
 
 ```{r}
 career <- read.csv('careerbuilder.csv', stringsAsFactors = FALSE)
+str(career)
+```
+
+From viewing the structure of the data frame above, we'll remove the "X" column, rename the "jobdesc" and "jobbank..Job.Title." column to the appropriate names, and add the column to indicate the website we scraped from for this set. We'll also fix the job_id to be in line with the previous two data frames.
+
+```{r}
 career <- career %>%
   rename(title = jobbank..Job.Title.,
          description = jobdesc) %>%
   select(-X) %>%
   mutate(website = "careerbuilder.com")
 career$job_id <- paste("CB", as.character(career$job_id), sep = "")
+
+str(career)
 ```
 
+###Merging the Three Data Frames
 
+Now that we have cleaned and prepared our three separate data sets from the three different sources, we can now unite them into a single data frame.
 
 ```{r}
 main_df <- full_join(linkedin,indeed, 
@@ -61,37 +106,49 @@ main_df <- full_join(main_df,career,
                           "industry",
                           "description",
                           "website"))
+
+knitr::kable(head(main_df), format = "html")
 ```
 
+Now that we have our single data frame, we can move onto building our database.
 
+#Building the Database in RSQLite
+
+In order to create our database to conform to standards, we've created separate dataframes to identify unique values for each variable in our main dataframe. We then applied IDs for each of those unique values. Each dataframe represents a table in our database. The below code takes the unique values for each column except for the jobs_id column. We'll also check to see each dataframe to make sure it has what we want.
 
 ```{r}
 industry <- unique(main_df$industry)
 industry_id <- paste("IN",as.character(1:length(industry)),sep = "")
 industry_df <- data.frame(industry,industry_id)
+knitr::kable(head(industry_df), format = "html")
 
 skills <- unique(main_df$skills)
 skills_id <- paste("SK",as.character(1:length(skills)),sep = "")
 skills_df <- data.frame(skills,skills_id)
+knitr::kable(head(skills_df), format = "html")
 
 title <- unique(main_df$title)
 title_id <- paste("TI",as.character(1:length(title)),sep = "")
 title_df <- data.frame(title,title_id)
+knitr::kable(head(title_df), format = "html")
 
 company <- unique(main_df$company)
 company_id <- paste("CO",as.character(1:length(company)),sep = "")
 company_df <- data.frame(company,company_id)
+knitr::kable(head(company_df), format = "html")
 
 website <- unique(main_df$website)
 website_id <- paste("WS",as.character(1:length(website)),sep = "")
 website_df <- data.frame(website,website_id)
+knitr::kable(head(website_df), format = "html")
 
 description <- unique(main_df$description)
 description_id <- paste("D",as.character(1:length(description)),sep = "")
 description_df <- data.frame(description,description_id)
+str(description_df)
 ```
 
-
+Now we'll build our jobs dataframe, which is a replica of the original main dataframe, but with ids instead of actual values for each variable. Doing this will allow for more flexibility and efficiency if we'd like to answer a variety of different questions.
 
 ```{r, warning=FALSE}
 jobs_df <- main_df %>%
@@ -102,9 +159,10 @@ jobs_df <- main_df %>%
   left_join(website_df, by="website") %>%
   left_join(description_df, by="description") %>%
   select(-industry,-skills,-title,-company,-website,-description)
+knitr::kable(head(jobs_df), format = "html")
 ```
 
-
+We can now load our data into a database and create our connection.
 
 ```{r}
 ds_job_db <- dbConnect(RSQLite::SQLite(), "")
@@ -118,17 +176,65 @@ dbWriteTable(ds_job_db, "description", description_df)
 dbWriteTable(ds_job_db, "jobs", jobs_df)
 ```
 
+#Exploratory Summary Analysis
+
+We'll now take a look at the following by writing SQL queries for each summary question and displaying on a simple graph using ggplot2:
+
+* Total number of jobs by website
+* Average number of data science skills required by each industry
+
+###Total Number of Jobs by Website
+
 ```{r}
-dbGetQuery(ds_job_db,
+jobs_cnt <- dbGetQuery(ds_job_db,
            "
 SELECT DISTINCT
-  W.WEBSITE
-  ,COUNT(DISTINCT J.JOB_ID) AS 'NUMBER OF JOBS'
+  W.WEBSITE as Website
+  ,COUNT(DISTINCT J.JOB_ID) AS 'Number of Jobs'
 FROM JOBS J
   INNER JOIN WEBSITE W ON J.WEBSITE_ID = W.WEBSITE_ID
 GROUP BY
   W.WEBSITE
            "
            )
+
+ggplot(jobs_cnt, aes(Website,`Number of Jobs`)) +
+  geom_bar(stat = "identity", aes(fill=Website)) +
+  theme_bw() +
+  geom_text(aes(label = `Number of Jobs`),vjust = 2)
+```
+
+###Average Number of Data Science Skills Required by Each Industry
+
+####Top 25 Industries that on average request the most number of skills.
+
+```{r}
+s_avg <- dbGetQuery(ds_job_db,
+           "
+SELECT
+  MAIN.INDUSTRY
+  ,AVG(MAIN.COUNT) AS 'Average Number of Skills'
+FROM (
+  SELECT DISTINCT
+    I.INDUSTRY
+    ,J.JOB_ID
+    ,COUNT(DISTINCT S.SKILLS_ID) AS COUNT
+  FROM JOBS J
+    INNER JOIN INDUSTRY I ON J.INDUSTRY_ID = I.INDUSTRY_ID
+    INNER JOIN SKILLS S ON J.SKILLS_ID = S.SKILLS_ID
+  GROUP BY
+    I.INDUSTRY
+    ,J.JOB_ID
+) MAIN
+WHERE
+  MAIN.INDUSTRY IS NOT NULL
+GROUP BY
+  MAIN.INDUSTRY
+ORDER BY
+  AVG(MAIN.COUNT) DESC
+LIMIT 25
+           "
+           )
+knitr::kable(s_avg, format = "html")
 ```
 
