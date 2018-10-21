@@ -204,9 +204,7 @@ ggplot(jobs_cnt, aes(Website,`Number of Jobs`)) +
   geom_text(aes(label = `Number of Jobs`),vjust = 2)
 ```
 
-###Average Number of Data Science Skills Required by Each Industry
-
-####Top 25 Industries that on average request the most number of skills.
+###Top 25 Industries that on average request the most number of skills.
 
 ```{r}
 s_avg <- dbGetQuery(ds_job_db,
